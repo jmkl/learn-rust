@@ -1,16 +1,30 @@
-use clap::{command, Arg};
-
+use clap::{arg, Command};
 use image::imageops::FilterType;
 use image::{GenericImageView, ImageBuffer, Rgba};
 use reqwest;
 use serde_json::{json, Value};
+use std::fs;
 use std::path::{Path, PathBuf};
-use std::{env, fs};
 use tungstenite::connect;
 use url::Url;
 use uuid::Uuid;
 
 static LCLHST: &str = "127.0.0.1:8188";
+static HELP: &str = r#"
+
+▄▄▄  ▄• ▄▌.▄▄ · ▄▄▄▄▄
+▀▄ █·█▪██▌▐█ ▀. •██         some tools for :
+▐▀▀▄ █▌▐█▌▄▀▀▀█▄ ▐█.▪       ..........ComfyUI API
+▐█•█▌▐█▄█▌▐█▄▪▐█ ▐█▌·       ..........Image Resize
+.▀  ▀ ▀▀▀  ▀▀▀▀  ▀▀▀
+
+USAGE:
+  file  inject ComfyUI workflow.json file using websocket
+  img   image processing stuff...
+                -i --inputdir       image's input directory
+                -o --outputdir      image's output directory
+                -s --size           image width
+"#;
 
 fn listen_to(_id: Uuid) {
     let (mut socket, _response) =
@@ -48,7 +62,8 @@ fn listen_to(_id: Uuid) {
     }
 }
 
-fn parse_json_file(file_path: &Path, _id: Uuid) {
+fn parse_json_file(file_path: &Path) {
+    let _id = Uuid::new_v4();
     let _contents = fs::read_to_string(&file_path).expect("Error Reading");
     let v: Value = serde_json::from_str(&_contents).expect("Error parsing");
     let params = json!({
@@ -64,65 +79,106 @@ fn parse_json_file(file_path: &Path, _id: Uuid) {
     listen_to(_id);
 }
 
-fn resize_img(img_path: &PathBuf) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+fn resize_img(img_path: &PathBuf, size: u32) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
     let reader = image::open(img_path).unwrap();
     let (w, h) = reader.dimensions();
-    image::imageops::resize(&reader.to_rgba8(), 300, (300 * h) / w, FilterType::Lanczos3)
+    image::imageops::resize(
+        &reader.to_rgba8(),
+        size,
+        (size * h) / w,
+        FilterType::Lanczos3,
+    )
 }
 
-fn image_processing() {
-    let path = std::env::current_dir().unwrap();
-    // let img_path = Path::join(&path, "img/test.png");
-    // let img_result = resize_img(&img_path);
-    // img_result.save(Path::join(&path, "out/out.png")).unwrap();
-
-    let img_path = Path::join(&path, "img");
-    let img_dir = fs::read_dir(img_path).unwrap();
-    // let files = img_dir
-    //     .map(|entry| {
-    //         let entry = entry.unwrap();
-    //         let entry_path = entry.path();
-    //         let file_name = entry_path.file_name().unwrap();
-    //         let file_name_as_str = file_name.to_str().unwrap();
-    //         let file_name_as_string = String::from(file_name_as_str);
-    //         file_name_as_string
-    //     })
-    //     .collect::<Vec<String>>();
+fn image_processing(indir: &str, outdir: &str, size: u32) {
+    let img_dir = fs::read_dir(indir).unwrap();
     for entry in img_dir.into_iter() {
         let img_path = entry.unwrap().path();
         let img_name = &img_path.file_name().to_owned();
-        let out_image = Path::new(&path)
-            .join("out")
+        let out_image = Path::new(&outdir)
             .join(format!("new_{}", img_name.unwrap().to_str().unwrap()).to_string());
-        println!("{:?}", out_image);
+        println!(
+            "save as :{}",
+            out_image
+                .file_name()
+                .unwrap()
+                .to_os_string()
+                .to_string_lossy()
+        );
 
-        let img_result = resize_img(&img_path);
+        let img_result = resize_img(&img_path, size);
         img_result.save(out_image).unwrap();
     }
-    //println!("{:?}", files);
 }
 
-fn do_stuff() {
-    let _id = Uuid::new_v4();
-    let matches = command!()
-        .arg(
-            Arg::new("file")
-                .short('f')
-                .long("file")
-                .required(true)
-                .value_parser(clap::value_parser!(std::path::PathBuf)),
-        )
-        .get_matches();
+fn cli() -> Command {
+    Command::new("rust_me")
+        .allow_external_subcommands(true)
+        .about(
+            r#"
 
-    let file_path = matches.get_one::<std::path::PathBuf>("file").unwrap();
-    let workflow_file = Path::new(&file_path);
-    if workflow_file.exists() {
-        parse_json_file(workflow_file, _id);
-    } else {
-        println!("corrupted file!... please try again");
-    }
+▄▄▄  ▄• ▄▌.▄▄ · ▄▄▄▄▄
+▀▄ █·█▪██▌▐█ ▀. •██         some tools for :
+▐▀▀▄ █▌▐█▌▄▀▀▀█▄ ▐█.▪       ..........ComfyUI API
+▐█•█▌▐█▄█▌▐█▄▪▐█ ▐█▌·       ..........Image Resize
+.▀  ▀ ▀▀▀  ▀▀▀▀  ▀▀▀"#,
+        )
+        .subcommand(
+            Command::new("file")
+                .about("inject ComfyUI workflow.json file using websocket")
+                .arg(arg!(<JSONFILE> "the json file we are talking about")),
+        )
+        .subcommand(
+            Command::new("img")
+                .about(
+                    r#"image processing stuff...
+    -i --inputdir       image's input directory
+    -o --outputdir      image's output directory
+    -s --size           image width"#,
+                )
+                .args([
+                    arg!(-i --inputdir <DIR> "image's input directory").required(true),
+                    arg!(-o --outputdir <DIR> "image's output directory").required(true),
+                    arg!(-s --size <DIR> "image width")
+                        .value_parser(clap::value_parser!(u32).range(100..)),
+                ]),
+        )
 }
 
 fn main() {
-    image_processing();
+    let matches = cli().get_matches();
+    match matches.subcommand() {
+        Some(("file", sub_mathces)) => {
+            let workflow_file = sub_mathces.get_one::<String>("JSONFILE").unwrap();
+            parse_json_file(Path::new(workflow_file));
+        }
+        Some(("img", sub_matches)) => {
+            let input = sub_matches
+                .get_one::<String>("inputdir")
+                .map(|s| s.as_str())
+                .unwrap_or_else(|| "");
+            let output = sub_matches
+                .get_one::<String>("outputdir")
+                .map(|s| s.as_str())
+                .unwrap_or_else(|| "");
+            let size = sub_matches.get_one::<u32>("size").unwrap_or_else(|| &300);
+
+            if !Path::new(input).exists() || !Path::new(output).exists() {
+                cli().print_help().unwrap();
+                return;
+            }
+            println!(
+                r#"Processing images....
+
+            inputdir        : {input}
+            outputdir       : {output}
+            size            : {size}
+            
+            "#
+            );
+
+            image_processing(input, output, *size);
+        }
+        _ => println!("{HELP}"),
+    }
 }
